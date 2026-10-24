@@ -75,6 +75,7 @@ input[type="radio"],input[type="checkbox"]{width:21px;height:21px;min-width:21px
 @media(max-height:500px) and (orientation:landscape){.main-actions{position:static;display:flex;flex-wrap:wrap;}.main-actions button{flex:1;min-width:100px;}}
 
 #analysisTxt{white-space:pre-wrap;}#figureBox img{display:block;max-width:100%;height:auto;margin:18px auto;border:1px solid #dde3ec;border-radius:6px;}
+.transfer-panel{margin-top:22px;padding:16px;border:1px solid #dfe5ed;border-radius:10px;background:#f8faff;}.transfer-panel p{margin:8px 0;}.transfer-panel .btns{margin:12px 0;}
 </style>
 </head>
 <body>
@@ -105,6 +106,7 @@ input[type="radio"],input[type="checkbox"]{width:21px;height:21px;min-width:21px
         <button id="submitBtn" onclick="submitAnswer()">提交答案</button>
         <button onclick="clearSel()">清除选择</button>
     </div>
+<section class="transfer-panel" aria-label="进度备份与转移"><b>电脑 / 手机进度转移</b><p class="hint">在做题设备上导出 JSON 文件，传到另一台设备后导入。导入将替换该设备的现有进度，建议先导出备份；这不是自动同步。</p><div class="btns"><button onclick="exportProgress()">导出进度</button><button onclick="el('progressFile').click()">导入进度</button></div><input id="progressFile" type="file" accept=".json,application/json" hidden><p id="transferStatus" class="hint" role="status" aria-live="polite"></p></section>
 <p id="storageStatus" class="hint" role="status"></p>
 </div>
 
@@ -208,6 +210,51 @@ function removeWrong(){
     persist();render();
 }
 el('goto').addEventListener('keydown',e=>{if(e.key==='Enter')goJump();});
+
+function progressSnapshot(){return {version:2,currentNo:pool[idx]??null,mode,pool:[...pool],records:JSON.parse(JSON.stringify(records)),wrong:[...wrongSet]};}
+function backupPayload(){return {format:'guide-exam-progress',backupVersion:1,examId:STORAGE_KEY,exportedAt:new Date().toISOString(),questionCount:questions.length,state:progressSnapshot()};}
+function validateBackup(data){
+    if(!data||data.format!=='guide-exam-progress'||data.backupVersion!==1)throw new Error('这不是支持的刷题进度文件。');
+    if(data.examId!==STORAGE_KEY||data.questionCount!==questions.length)throw new Error('这份进度不属于当前题库，请在对应题库中导入。');
+    const s=data.state;
+    if(!s||s.version!==2||!['all','wrong'].includes(s.mode)||!s.records||typeof s.records!=='object'||Array.isArray(s.records)||!Array.isArray(s.pool)||!Array.isArray(s.wrong))throw new Error('进度文件内容不完整或已损坏。');
+    const validNumbers=a=>a.every(n=>Number.isInteger(n)&&byNo.has(n))&&new Set(a).size===a.length;
+    if(!validNumbers(s.pool)||!validNumbers(s.wrong))throw new Error('进度文件包含无效题号。');
+    if(s.mode==='all'&&(s.pool.length!==questions.length||s.pool.some((n,i)=>n!==questions[i].no)))throw new Error('全部题目的顺序不正确。');
+    if(s.mode==='wrong'&&s.pool.some(n=>!s.wrong.includes(n)))throw new Error('错题列表不一致。');
+    if(s.pool.length?!s.pool.includes(s.currentNo):s.currentNo!==null)throw new Error('当前题号无效。');
+    for(const [no,r] of Object.entries(s.records)){
+        const q=byNo.get(Number(no));
+        if(!q||String(q.no)!==no||!r||!Array.isArray(r.selected)||typeof r.submitted!=='boolean'||r.selected.some(v=>typeof v!=='string'||!q.opt.some(o=>o[0]===v))||new Set(r.selected).size!==r.selected.length||(q.type!=='multi'&&r.selected.length>1)||(r.submitted&&!r.selected.length))throw new Error('作答记录格式不正确。');
+    }
+    return JSON.parse(JSON.stringify(s));
+}
+function exportProgress(){
+    try{
+        const payload=backupPayload(),blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json;charset=utf-8'});
+        const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='科三科四-做题进度-'+new Date().toISOString().replace(/[:.]/g,'-')+'.json';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);
+        el('transferStatus').textContent='已请求下载进度文件。苹果手机请查看 Safari 下载列表或“文件”中的下载项，再把 JSON 文件传到另一设备。';
+    }catch(e){el('transferStatus').textContent='导出失败：'+e.message;}
+}
+function applyBackup(data){
+    const s=validateBackup(data);
+    // Write successfully before changing the current session, so a storage failure preserves it.
+    localStorage.setItem(STORAGE_KEY,JSON.stringify(s));
+    records={};wrongSet=new Set();idx=0;mode='all';pool=questions.map(q=>q.no);restore();render();
+}
+async function importProgressFile(event){
+    const input=event.target,file=input.files?.[0];if(!file)return;
+    try{
+        if(file.size>5*1024*1024)throw new Error('文件过大，请选择导出的 JSON 进度文件，不要选择 HTML 题库。');
+        const data=JSON.parse((await file.text()).replace(/^\uFEFF/,'')),s=validateBackup(data);
+        const answered=Object.values(s.records).filter(r=>r.submitted).length;
+        if(!confirm('即将导入：已判分 '+answered+' 题，错题 '+s.wrong.length+' 题。\n这会替换本设备当前题库的进度。建议先导出当前进度备份。\n确定导入吗？')){el('transferStatus').textContent='已取消导入，原进度保留。';return;}
+        applyBackup(data);el('transferStatus').textContent='导入成功！已恢复作答、错题及所在题目，后续会继续自动保存到本设备。';
+    }catch(e){el('transferStatus').textContent='导入失败，原进度保留：'+e.message;}
+    finally{input.value='';}
+}
+el('progressFile').addEventListener('change',importProgressFile);
+
 restore();render();
 </script>
 </body>
