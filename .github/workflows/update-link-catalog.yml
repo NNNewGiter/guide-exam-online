@@ -1,0 +1,42 @@
+name: 自动更新刷题链接Excel
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**.html'
+      - '**/*.html'
+      - 'scripts/update_link_catalog.py'
+      - '.github/workflows/update-link-catalog.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-link-catalog
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 下载最新main分支
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+      - name: 生成Excel目录
+        run: python3 scripts/update_link_catalog.py
+      - name: 仅提交目录文件
+        shell: bash
+        run: |
+          git add -- '刷题链接目录.xlsx'
+          if git diff --cached --quiet; then
+            echo '目录内容未变，无需提交。'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m '自动更新刷题链接目录'
+          git push origin HEAD:main
