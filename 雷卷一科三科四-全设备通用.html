@@ -82,7 +82,10 @@ input[type="radio"],input[type="checkbox"]{width:21px;height:21px;min-width:21px
 <body>
 <div class="card">
     <h2>2026冲刺标准卷一 · 科三科四</h2><p class="hint">雷卷一 · 原卷图文版 · 判断40题 / 单选90题 / 多选35题 · 电脑、手机、平板通用</p>
+    <p class="hint">计分规则：判断、单选每题 0.5 分，多选每题 1 分；错选、少选、多选均不得分。满分 100 分，未提交的多选题暂不计分。</p>
     <div class="info">
+        <div><b>得分：<span id="score">0</span> / <span id="scoreMax">100</span> 分</b></div>
+        <div>已判分：<span id="gradedCount">0</span> / <span id="gradableCount">165</span></div>
         <div>题号跳转：<input id="goto" type="number" min="1" max="165" step="1" inputmode="numeric" enterkeyhint="go" aria-label="跳转到原题号"><button onclick="goJump()">跳转</button></div>
         <div>当前：<span id="cur">1</span> / <span id="total">0</span></div>
         <div>✅答对：<span id="r">0</span></div>
@@ -148,7 +151,22 @@ function restore(){
         idx=Math.max(0,pool.indexOf(s.currentNo));
     }catch(e){el('storageStatus').textContent='原保存记录无法读取，本次从头开始。';}
 }
+function questionPoints(item){return item.type==='multi'?1:0.5;}
+function scoreSummary(){
+ let score=0,max=0,answered=0,count=0;
+ for(const item of questions){
+  if(!item.ans)continue;
+  const points=questionPoints(item);max+=points;count++;
+  const record=records[item.no];if(!record?.submitted)continue;
+  answered++;
+  if(normalized(record.selected)===normalized(item.ans.split('')))score+=points;
+ }
+ return {score,max,answered,count};
+}
 function render(){
+    const summary=scoreSummary();
+    el('score').textContent=summary.score;el('scoreMax').textContent=summary.max;
+    el('gradedCount').textContent=summary.answered;el('gradableCount').textContent=summary.count;
     const item=current();
     let right=0,wrong=0;
     for(const q of questions){const r=records[q.no];if(r?.submitted){normalized(r.selected)===normalized(q.ans.split(''))?right++:wrong++;}}
